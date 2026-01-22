@@ -39,15 +39,14 @@ def get_nifty500_tickers():
         symbols = [x + ".NS" for x in df['Symbol'] if "DUMMY" not in x]
         return symbols
     except Exception as e:
-        return ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'ICICIBANK.NS', 'ITC.NS', 'SBIN.NS']
+        return ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'ICICIBANK.NS']
 
 @st.cache_data(ttl=3600)
 def fetch_data_long_term(tickers):
-    # CHANGED: Start date set to 2015-01-01
     start_date = "2015-01-01"
     
-    # Tuning for larger history (11 years)
-    chunk_size = 50          # Larger batches to reduce total overhead
+    # Tuning for stability
+    chunk_size = 50          
     sleep_time = 0.5         
     
     ticker_chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
@@ -58,7 +57,6 @@ def fetch_data_long_term(tickers):
     
     for i, batch in enumerate(ticker_chunks):
         try:
-            # Increased timeout to 20s because 11 years of data is heavy
             batch_data = yf.download(batch, start=start_date, progress=False, threads=False, timeout=20)
             
             if isinstance(batch_data.columns, pd.MultiIndex):
@@ -95,7 +93,6 @@ def calculate_breadth(data):
     sma_200 = data.rolling(window=200).mean()
     valid_stocks = data.notna().sum(axis=1)
     
-    # Quorum: We need at least 50 valid stocks to plot a point
     valid_mask = valid_stocks >= 50 
     
     count_above = (data >= sma_200).sum(axis=1)
@@ -122,15 +119,71 @@ if not breadth.empty:
     c2.metric("Sentiment", sentiment)
     c3.metric("Stocks Tracked", f"{data.shape[1]}")
 
+    # --- INTERACTIVE CHART ---
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=breadth.index, y=breadth.values, fill='tozeroy', 
-                             line=dict(color='#00f2ff', width=1.5), name='Breadth'))
+
+    # 1. Main Breadth Line
+    fig.add_trace(go.Scatter(
+        x=breadth.index, 
+        y=breadth.values,
+        mode='lines',
+        name='Breadth',
+        line=dict(color='#00f2ff', width=2), # Cyan Neon
+        hovertemplate='<b>Date:</b> %{x|%d-%b-%Y}<br><b>Value:</b> %{y:.2f}%<extra></extra>'
+    ))
+
+    # 2. Highlight Zones (Rectangles)
+    # Green Zone (<20%)
+    fig.add_hrect(
+        y0=0, y1=20, 
+        fillcolor="green", opacity=0.15, 
+        layer="below", line_width=0,
+        annotation_text="Oversold Zone (Buy)", annotation_position="top left",
+        annotation_font_color="green"
+    )
     
-    for l, c in [(90,'red'), (80,'orange'), (20,'green')]:
-        fig.add_shape(type="line", x0=breadth.index.min(), x1=breadth.index.max(), y0=l, y1=l, 
-                      line=dict(color=c, dash='dot'))
-    
-    fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=600, margin=dict(t=30, b=0))
+    # Red Zone (>80%)
+    fig.add_hrect(
+        y0=80, y1=100, 
+        fillcolor="red", opacity=0.15, 
+        layer="below", line_width=0,
+        annotation_text="Overbought Zone (Caution)", annotation_position="bottom left",
+        annotation_font_color="red"
+    )
+
+    # 3. Reference Lines (The actual lines for 20 and 80)
+    for l, c in [(90,'#ef4444'), (80,'#ef4444'), (20,'#22c55e'), (10,'#22c55e')]:
+        fig.add_shape(
+            type="line", x0=breadth.index.min(), x1=breadth.index.max(), 
+            y0=l, y1=l, 
+            line=dict(color=c, dash='dot', width=1)
+        )
+
+    # 4. Layout with SCROLL BAR (Range Slider)
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        height=600,
+        margin=dict(t=30, b=0),
+        
+        # Y-Axis
+        yaxis=dict(
+            range=[0, 100], 
+            gridcolor='#374151',
+            fixedrange=True # Keeps Y-axis fixed so you only scroll sideways
+        ),
+        
+        # X-Axis (THE SCROLL BAR)
+        xaxis=dict(
+            gridcolor='#374151',
+            type="date",
+            rangeslider=dict(visible=True) # <--- THIS ENABLES THE SCROLLING
+        ),
+        
+        hovermode="x unified"
+    )
+
     st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("View Raw Data"):
