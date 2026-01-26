@@ -140,19 +140,49 @@ if tickers:
 
             # --- CHART 1: BREADTH PERCENTAGE ---
             st.subheader("1. Breadth Percentage (Indicator)")
+            
+            # Calculate Peaks and Troughs
+            max_breadth = df_final['Breadth %'].max()
+            max_date = df_final['Breadth %'].idxmax()
+            min_breadth = df_final['Breadth %'].min()
+            min_date = df_final['Breadth %'].idxmin()
+
             fig1 = go.Figure()
+            # Main Line
             fig1.add_trace(go.Scatter(x=df_final.index, y=df_final['Breadth %'], fill='tozeroy', 
+                                     fillcolor='rgba(0, 242, 255, 0.2)',
                                      line=dict(color='#00f2ff', width=1.5), name='Breadth %'))
             
-            # Zones
-            fig1.add_hrect(y0=0, y1=20, fillcolor="green", opacity=0.15, layer="below", line_width=0)
-            fig1.add_hrect(y0=80, y1=100, fillcolor="red", opacity=0.15, layer="below", line_width=0)
+            # --- COLOR BANDS ---
+            # 1. GREEN BAND (0-20%): Prominent Green
+            fig1.add_hrect(y0=0, y1=20, fillcolor="green", opacity=0.3, layer="below", line_width=0)
+            
+            # 2. RED BAND (80-100%): Prominent Red
+            fig1.add_hrect(y0=80, y1=100, fillcolor="red", opacity=0.3, layer="below", line_width=0)
+            
+            # Note: 20-80% is left as default (Black/Dark Background)
+            
+            # Reference Lines (Dotted)
             for l in [20, 50, 80]:
                 fig1.add_shape(type="line", x0=df_final.index.min(), x1=df_final.index.max(), y0=l, y1=l, 
                               line=dict(color='gray', dash='dot', width=1), opacity=0.5)
 
+            # Annotations for Peak and Trough
+            fig1.add_annotation(
+                x=max_date, y=max_breadth,
+                text=f"Peak: {max_breadth:.1f}%",
+                showarrow=True, arrowhead=1, ax=0, ay=-40,
+                bgcolor="#1f2937", bordercolor="#ef4444", font=dict(color="#ef4444")
+            )
+            fig1.add_annotation(
+                x=min_date, y=min_breadth,
+                text=f"Trough: {min_breadth:.1f}%",
+                showarrow=True, arrowhead=1, ax=0, ay=40,
+                bgcolor="#1f2937", bordercolor="#22c55e", font=dict(color="#22c55e")
+            )
+
             fig1.update_layout(
-                template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=400,
+                template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=450,
                 xaxis=dict(rangeslider=dict(visible=False), type="date"),
                 yaxis=dict(range=[0, 100], fixedrange=True, title="Percentage (%)"),
                 margin=dict(t=10, b=10)
@@ -168,9 +198,9 @@ if tickers:
                 x=df_final.index, y=df_final['Count Above'],
                 mode='lines',
                 name='Above 200 SMA',
-                stackgroup='one', # This creates the stack
+                stackgroup='one', 
                 line=dict(width=0),
-                fillcolor='rgba(34, 197, 94, 0.6)' # Green
+                fillcolor='rgba(34, 197, 94, 0.6)' 
             ))
 
             # Stacked Area: Red (Below)
@@ -180,12 +210,12 @@ if tickers:
                 name='Below 200 SMA',
                 stackgroup='one',
                 line=dict(width=0),
-                fillcolor='rgba(239, 68, 68, 0.6)' # Red
+                fillcolor='rgba(239, 68, 68, 0.6)' 
             ))
 
             fig2.update_layout(
                 template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=400,
-                xaxis=dict(rangeslider=dict(visible=True), type="date"), # Scrollbar on the bottom chart
+                xaxis=dict(rangeslider=dict(visible=True), type="date"), 
                 yaxis=dict(title="Number of Stocks"),
                 hovermode="x unified",
                 margin=dict(t=10, b=0),
