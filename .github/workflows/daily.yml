@@ -1,0 +1,35 @@
+name: Daily Market Update
+
+on:
+  schedule:
+    - cron: '30 12 * * *' # Runs at 12:30 UTC (6:00 PM IST)
+  workflow_dispatch:      # Allows manual trigger button
+
+permissions:
+  contents: write
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install pandas yfinance requests
+
+      - name: Run Update Script
+        run: python update_data.py
+
+      - name: Commit and Push CSV
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add market_breadth.csv
+          git commit -m "Auto-update market data" || exit 0
+          git push
