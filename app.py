@@ -179,4 +179,23 @@ if tickers:
                 mode='lines',
                 name='Below 200 SMA',
                 stackgroup='one',
-                line=dict(
+                line=dict(width=0),
+                fillcolor='rgba(239, 68, 68, 0.6)' # Red
+            ))
+
+            fig2.update_layout(
+                template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=400,
+                xaxis=dict(rangeslider=dict(visible=True), type="date"), # Scrollbar on the bottom chart
+                yaxis=dict(title="Number of Stocks"),
+                hovermode="x unified",
+                margin=dict(t=10, b=0),
+                legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center")
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+            
+        else:
+            st.error("Calculated data is empty.")
+    else:
+        st.error("No data downloaded.")
+else:
+    st.error("Could not fetch ticker list.")
