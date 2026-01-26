@@ -102,8 +102,8 @@ def fetch_full_market_data(tickers):
     if not tickers:
         return pd.DataFrame()
     
-    chunk_size = 12          # smaller = safer in 2026
-    sleep_time = 3.0         # increased
+    chunk_size = 12          # smaller = safer
+    sleep_time = 3.0
     max_retries_per_chunk = 2
     
     n = len(tickers)
@@ -115,52 +115,51 @@ def fetch_full_market_data(tickers):
     progress = st.progress(0.0)
     status_text = st.empty()
     
+    time_start = time.time()   # Fixed: define elapsed time reference
+    
     for i, chunk in enumerate(chunks):
         for attempt in range(max_retries_per_chunk + 1):
             try:
-                status_text.text(f"Batch {i+1}/{len(chunks)} (attempt {attempt+1}) – {int(time.time() - time_start):,}s elapsed")
+                elapsed = int(time.time() - time_start)
+                status_text.text(f"Batch {i+1}/{len(chunks)} (attempt {attempt+1}) – {elapsed}s elapsed")
                 
                 batch = yf.download(
                     chunk,
-                    start="2020-01-01",      # ← shorter history = much more reliable
+                    start="2020-01-01",
                     progress=False,
                     threads=False,
                     timeout=30,
                     auto_adjust=True,
-                    repair=True              # tries to fix some broken responses
+                    repair=True
                 )
                 
-                # Robust column extraction
                 if batch.empty:
                     break
                 
+                # Robust Close extraction
                 if isinstance(batch.columns, pd.MultiIndex):
                     if 'Close' in batch.columns.get_level_values(0):
                         batch = batch['Close']
                     elif 'Close' in batch.columns.get_level_values(1):
                         batch = batch.xs('Close', axis=1, level=1, drop_level=True)
                     else:
-                        # fallback – take first level if only one ticker or broken
                         batch = batch.iloc[:, :len(chunk)]
-                        batch.columns = chunk[:len(batch.columns)]
-                else:
-                    # single ticker case
-                    if len(chunk) == 1:
-                        batch.columns = chunk
+                        batch.columns = [t for t in chunk[:len(batch.columns)]]
+                elif len(chunk) == 1:
+                    batch.columns = chunk
                 
-                # Drop completely empty columns
                 batch = batch.dropna(axis=1, how='all')
                 
                 if not batch.empty:
                     all_data.append(batch)
                 
-                break  # success → next chunk
+                break  # success
                 
             except Exception as e:
                 if attempt < max_retries_per_chunk:
                     time.sleep(5 * (attempt + 1))
                 else:
-                    st.warning(f"Batch {i+1} failed after retries: {e}")
+                    st.warning(f"Batch {i+1} failed after {max_retries_per_chunk+1} attempts: {str(e)}")
         
         progress.progress((i + 1) / len(chunks))
         time.sleep(sleep_time)
@@ -172,12 +171,10 @@ def fetch_full_market_data(tickers):
         return pd.DataFrame()
     
     df = pd.concat(all_data, axis=1)
-    # Final cleanup
     df = df.loc[:, ~df.columns.duplicated()]
-    df = df.dropna(how='all', axis=0)   # remove fully empty rows
+    df = df.dropna(how='all', axis=0)
     
     return df
-
 # ---------------------------------------------------------
 # MAIN LOGIC
 # ---------------------------------------------------------
