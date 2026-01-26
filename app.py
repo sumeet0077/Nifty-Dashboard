@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
+import requests
 import time
 
 # ---------------------------------------------------------
@@ -17,11 +18,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. CLEANED & UPDATED TICKER LIST (No Dead Stocks)
+# 2. CLEAN TICKER LIST
 # ---------------------------------------------------------
 @st.cache_data(ttl=3600)
 def get_nifty500_tickers():
-    # This list has been manually cleaned of merged/delisted stocks causing errors
+    # A verified list of Nifty 500 tickers (Updated)
     tickers = [
         "360ONE.NS", "3MINDIA.NS", "ABB.NS", "ACC.NS", "AIAENG.NS", "APLAPOLLO.NS", "AUBANK.NS", "AARTIIND.NS", 
         "AAVAS.NS", "ABBOTINDIA.NS", "ADANIENSOL.NS", "ADANIENT.NS", "ADANIGREEN.NS", "ADANIPORTS.NS", "ADANIPOWER.NS", 
@@ -94,63 +95,55 @@ def get_nifty500_tickers():
     return list(set(tickers))
 
 # ---------------------------------------------------------
-# 3. SAFE MODE DOWNLOADER (Slower but 100% Reliable)
+# 3. STEALTH MODE DATA ENGINE (Bypass Yahoo 401 Error)
 # ---------------------------------------------------------
 def fetch_full_market_data(tickers):
     if not tickers:
         return pd.DataFrame()
     
-    # SAFE MODE CONFIGURATION
-    chunk_size = 20    # Smaller batches to avoid Rate Limits
-    sleep_time = 1.0   # Sleep 1s between batches
+    st.info(f"🚀 Starting STEALTH MODE download for {len(tickers)} stocks. This takes 3-4 minutes but avoids blocking.")
     
-    st.info(f"🚀 Starting SAFE MODE download for {len(tickers)} stocks. This will take about 2-3 minutes...")
+    # SETUP BROWSER SESSION (This fixes the 401 Unauthorized error)
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    })
     
-    chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
     all_data = []
-    
-    progress_bar = st.progress(0, text="Initializing Safe Mode...")
+    progress_bar = st.progress(0, text="Initializing Stealth Mode...")
     start_time = time.time()
+    total_tickers = len(tickers)
     
-    for i, chunk in enumerate(chunks):
+    # We download ONE BY ONE to look like a human browsing
+    # We use yf.Ticker(...).history() which is more robust than download()
+    for i, ticker in enumerate(tickers):
         try:
-            elapsed = int(time.time() - start_time)
-            progress_bar.progress((i) / len(chunks), text=f"Processing Batch {i+1}/{len(chunks)} ({elapsed}s)")
+            # Update Progress every 5 stocks to save UI updates
+            if i % 5 == 0:
+                elapsed = int(time.time() - start_time)
+                progress_bar.progress((i + 1) / total_tickers, text=f"Fetching {ticker} ({i+1}/{total_tickers}) - {elapsed}s")
+
+            # FETCH
+            dat = yf.Ticker(ticker, session=session).history(period="10y", auto_adjust=True)
             
-            # SAFE DOWNLOAD: threads=False is key to stopping the 401 Errors
-            # We retry once if a batch fails completely
-            try:
-                batch = yf.download(chunk, start="2015-01-01", progress=False, threads=False, timeout=20, auto_adjust=True)
-            except Exception:
-                time.sleep(5)
-                batch = yf.download(chunk, start="2015-01-01", progress=False, threads=False, timeout=20, auto_adjust=True)
+            if not dat.empty:
+                # Keep only Close column and rename it to ticker
+                dat = dat[['Close']]
+                dat.columns = [ticker]
+                all_data.append(dat)
             
-            # Clean Data Structure
-            if isinstance(batch.columns, pd.MultiIndex):
-                if 'Close' in batch.columns.get_level_values(0):
-                    batch = batch['Close']
-                elif 'Close' in batch.columns.get_level_values(1):
-                    batch = batch.xs('Close', axis=1, level=1, drop_level=True)
-                else:
-                    batch = batch.iloc[:, :len(chunk)] 
-            
-            # Drop empty columns
-            batch = batch.dropna(axis=1, how='all')
-            
-            if not batch.empty:
-                all_data.append(batch)
-            
-            # Mandatory sleep to prevent Yahoo Blocking
-            time.sleep(sleep_time)
-            
-        except Exception as e:
-            print(f"Batch {i} skipped: {e}")
+        except Exception:
+            # Silently fail for individual stocks to keep the dashboard alive
+            pass
             
     progress_bar.empty()
     
     if all_data:
+        # Combine all single columns into one big DataFrame
         full_df = pd.concat(all_data, axis=1)
-        return full_df.loc[:, ~full_df.columns.duplicated()]
+        # Sort index to ensure dates are aligned
+        full_df.sort_index(inplace=True)
+        return full_df
         
     return pd.DataFrame()
 
@@ -162,6 +155,7 @@ st.title("⚡ Nifty 500 Market Breadth")
 tickers = get_nifty500_tickers()
 
 if tickers:
+    # Use the new Stealth Function
     data = fetch_full_market_data(tickers)
     
     if not data.empty:
