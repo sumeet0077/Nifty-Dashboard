@@ -2,13 +2,14 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
-import requests
 import time
+import numpy as np
 
 # ---------------------------------------------------------
-# 1. PAGE CONFIGURATION
+# PAGE CONFIGURATION
 # ---------------------------------------------------------
 st.set_page_config(page_title="Nifty 500 Market Breadth", layout="wide")
+
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; } 
@@ -18,9 +19,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. CLEAN TICKER LIST
+# TICKER LIST (manually maintained – update periodically)
 # ---------------------------------------------------------
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=86400)  # 24 hours
 def get_nifty500_tickers():
     tickers = [
         "360ONE.NS", "3MINDIA.NS", "ABB.NS", "ACC.NS", "AIAENG.NS", "APLAPOLLO.NS", "AUBANK.NS", "AARTIIND.NS", 
@@ -90,169 +91,200 @@ def get_nifty500_tickers():
         "VAKRANGEE.NS", "VARROC.NS", "VBL.NS", "VEDL.NS", "MANYAVAR.NS", "VIJAYA.NS", "VINATIORGA.NS", "IDEA.NS", 
         "VOLTAS.NS", "WELCORP.NS", "WELSPUNLIV.NS", "WESTLIFE.NS", "WHIRLPOOL.NS", "WIPRO.NS", "WOCKPHARMA.NS", 
         "YESBANK.NS", "ZFCVINDIA.NS", "ZEEL.NS", "ZENSARTECH.NS", "ZOMATO.NS", "ZYDUSLIFE.NS", "ZYDUSWELL.NS", "ECLERX.NS"
+        # Add newly included stocks from 2024–2026 here (check NSE monthly)
     ]
-    return list(set(tickers))
+    return sorted(list(set(tickers)))   # remove accidental duplicates
 
 # ---------------------------------------------------------
-# 3. ROBUST SESSION-PER-BATCH DOWNLOADER
+# IMPROVED SAFE DOWNLOADER
 # ---------------------------------------------------------
 def fetch_full_market_data(tickers):
     if not tickers:
         return pd.DataFrame()
     
-    st.info(f"🚀 Starting ROBUST download for {len(tickers)} stocks. This takes 2-3 minutes...")
+    chunk_size = 12          # smaller = safer in 2026
+    sleep_time = 3.0         # increased
+    max_retries_per_chunk = 2
     
-    # Batch size 15 is safe for Yahoo limits
-    chunk_size = 15 
-    chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
+    n = len(tickers)
+    st.info(f"Downloading {n} Nifty 500 stocks in safe mode (~4–7 min)...")
     
+    chunks = [tickers[i:i + chunk_size] for i in range(0, n, chunk_size)]
     all_data = []
-    progress_bar = st.progress(0, text="Initializing...")
-    start_time = time.time()
+    
+    progress = st.progress(0.0)
+    status_text = st.empty()
     
     for i, chunk in enumerate(chunks):
-        try:
-            # Create a FRESH session for each batch to prevent "dictionary changed size" error
-            # and to reset headers/cookies which fools Yahoo better.
-            session = requests.Session()
-            session.headers.update({
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            })
-
-            elapsed = int(time.time() - start_time)
-            progress_bar.progress((i) / len(chunks), text=f"Downloading Batch {i+1}/{len(chunks)} ({elapsed}s)")
-            
-            # Using download() with the session is cleaner for batches
-            batch = yf.download(
-                chunk, 
-                start="2015-01-01", 
-                progress=False, 
-                threads=False, # Must be False to use custom session correctly
-                timeout=20, 
-                auto_adjust=True,
-                session=session # Pass the fresh session
-            )
-            
-            # Clean Data Structure
-            if isinstance(batch.columns, pd.MultiIndex):
-                if 'Close' in batch.columns.get_level_values(0):
-                    batch = batch['Close']
-                elif 'Close' in batch.columns.get_level_values(1):
-                    batch = batch.xs('Close', axis=1, level=1, drop_level=True)
+        for attempt in range(max_retries_per_chunk + 1):
+            try:
+                status_text.text(f"Batch {i+1}/{len(chunks)} (attempt {attempt+1}) – {int(time.time() - time_start):,}s elapsed")
+                
+                batch = yf.download(
+                    chunk,
+                    start="2020-01-01",      # ← shorter history = much more reliable
+                    progress=False,
+                    threads=False,
+                    timeout=30,
+                    auto_adjust=True,
+                    repair=True              # tries to fix some broken responses
+                )
+                
+                # Robust column extraction
+                if batch.empty:
+                    break
+                
+                if isinstance(batch.columns, pd.MultiIndex):
+                    if 'Close' in batch.columns.get_level_values(0):
+                        batch = batch['Close']
+                    elif 'Close' in batch.columns.get_level_values(1):
+                        batch = batch.xs('Close', axis=1, level=1, drop_level=True)
+                    else:
+                        # fallback – take first level if only one ticker or broken
+                        batch = batch.iloc[:, :len(chunk)]
+                        batch.columns = chunk[:len(batch.columns)]
                 else:
-                    batch = batch.iloc[:, :len(chunk)]
-            
-            # Drop empty
-            batch = batch.dropna(axis=1, how='all')
-            
-            if not batch.empty:
-                all_data.append(batch)
-            
-            # Sleep 1 second between batches
-            time.sleep(1)
-            
-        except Exception as e:
-            print(f"Batch {i} skipped: {e}")
-            
-    progress_bar.empty()
-    
-    if all_data:
-        full_df = pd.concat(all_data, axis=1)
-        return full_df.loc[:, ~full_df.columns.duplicated()]
+                    # single ticker case
+                    if len(chunk) == 1:
+                        batch.columns = chunk
+                
+                # Drop completely empty columns
+                batch = batch.dropna(axis=1, how='all')
+                
+                if not batch.empty:
+                    all_data.append(batch)
+                
+                break  # success → next chunk
+                
+            except Exception as e:
+                if attempt < max_retries_per_chunk:
+                    time.sleep(5 * (attempt + 1))
+                else:
+                    st.warning(f"Batch {i+1} failed after retries: {e}")
         
-    return pd.DataFrame()
+        progress.progress((i + 1) / len(chunks))
+        time.sleep(sleep_time)
+    
+    status_text.empty()
+    progress.empty()
+    
+    if not all_data:
+        return pd.DataFrame()
+    
+    df = pd.concat(all_data, axis=1)
+    # Final cleanup
+    df = df.loc[:, ~df.columns.duplicated()]
+    df = df.dropna(how='all', axis=0)   # remove fully empty rows
+    
+    return df
 
 # ---------------------------------------------------------
-# 4. MAIN APP LOGIC
+# MAIN LOGIC
 # ---------------------------------------------------------
-st.title("⚡ Nifty 500 Market Breadth")
+st.title("⚡ Nifty 500 Market Breadth Dashboard")
 
 tickers = get_nifty500_tickers()
 
-if tickers:
-    data = fetch_full_market_data(tickers)
+if not tickers:
+    st.error("Ticker list empty.")
+    st.stop()
+
+data = fetch_full_market_data(tickers)
+
+if data.empty:
+    st.error("Failed to download any usable data. Try again later — Yahoo is very strict in 2026.")
+    st.stop()
+
+with st.spinner("Computing breadth indicators..."):
+    sma_200 = data.rolling(window=200, min_periods=100).mean()   # allow partial on newer stocks
     
-    if not data.empty:
-        with st.spinner("Calculating metrics..."):
-            sma_200 = data.rolling(window=200).mean()
-            
-            latest_sma_values = sma_200.iloc[-1]
-            excluded_tickers = latest_sma_values[latest_sma_values.isna()].index.tolist()
-            excluded_clean = [x.replace('.NS', '') for x in excluded_tickers]
-            
-            has_sma = sma_200.notna()
-            
-            count_above = (data > sma_200).astype(int).where(has_sma).sum(axis=1)
-            count_below = (data <= sma_200).astype(int).where(has_sma).sum(axis=1)
-            
-            valid_total = count_above + count_below
-            total_target = len(tickers)
-            count_excluded = total_target - valid_total
-            
-            breadth_pct = (count_above / valid_total) * 100
-            breadth_pct[valid_total < 100] = pd.NA
-            
-            df_final = pd.DataFrame({
-                'Breadth %': breadth_pct,
-                'Count Above': count_above,
-                'Count Below': count_below,
-                'Excluded': count_excluded
-            }).dropna()
+    # Latest complete day
+    latest_close = data.iloc[-1]
+    latest_sma   = sma_200.iloc[-1]
+    
+    valid_mask = latest_sma.notna() & latest_close.notna()
+    
+    above = (latest_close > latest_sma) & valid_mask
+    below = (latest_close <= latest_sma) & valid_mask
+    
+    count_above_now = above.sum()
+    count_below_now = below.sum()
+    count_valid_now = count_above_now + count_below_now
+    count_excluded  = len(tickers) - count_valid_now
+    
+    excluded_tickers = data.columns[~valid_mask].str.replace('.NS$', '', regex=True).tolist()
+    
+    # Time series for chart
+    has_sma = sma_200.notna()
+    count_above_ts = (data > sma_200).where(has_sma).sum(axis=1)
+    count_below_ts = (data <= sma_200).where(has_sma).sum(axis=1)
+    
+    breadth_pct_ts = (count_above_ts / (count_above_ts + count_below_ts) * 100).where((count_above_ts + count_below_ts) >= 100)
+    
+    df_chart = pd.DataFrame({
+        'Date': data.index,
+        'Breadth %': breadth_pct_ts,
+        'Above': count_above_ts,
+        'Below': count_below_ts
+    }).dropna(subset=['Breadth %'])
 
-        if not df_final.empty:
-            latest = df_final.iloc[-1]
-            prev = df_final.iloc[-2] if len(df_final) > 1 else latest
-            
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Stocks > 200 SMA (%)", f"{latest['Breadth %']:.1f}%", f"{latest['Breadth %'] - prev['Breadth %']:.1f}%")
-            c2.metric("Count Above", f"{int(latest['Count Above'])}", f"{int(latest['Count Above'] - prev['Count Above'])}")
-            c3.metric("Count Below", f"{int(latest['Count Below'])}", f"{int(latest['Count Below'] - prev['Count Below'])}", delta_color="inverse")
-            c4.metric("Excluded (New/No Data)", f"{int(latest['Excluded'])}")
+# ────────────────────────────────────────────────
+# METRICS
+# ────────────────────────────────────────────────
+if not df_chart.empty:
+    latest = df_chart.iloc[-1]
+    prev   = df_chart.iloc[-2] if len(df_chart) > 1 else latest
+    
+    cols = st.columns(4)
+    cols[0].metric("Above 200 SMA (%)", f"{latest['Breadth %']:.1f}%", f"{latest['Breadth %']-prev['Breadth %']:.1f}%")
+    cols[1].metric("Count Above", f"{int(latest['Above']):,}", f"{int(latest['Above']-prev['Above']):+}")
+    cols[2].metric("Count Below", f"{int(latest['Below']):,}", f"{int(latest['Below']-prev['Below']):+}", delta_color="inverse")
+    cols[3].metric("Excluded / No 200 SMA", f"{count_excluded} / {len(tickers)}")
 
-            # Chart 1
-            st.subheader("1. Breadth Percentage")
-            fig1 = go.Figure()
-            fig1.add_trace(go.Scatter(x=df_final.index, y=df_final['Breadth %'], fill='tozeroy', 
-                                     fillcolor='rgba(0, 242, 255, 0.2)',
-                                     line=dict(color='#00f2ff', width=1.5), name='Breadth %'))
-            
-            fig1.add_hrect(y0=0, y1=20, fillcolor="green", opacity=0.3, layer="below", line_width=0)
-            fig1.add_hrect(y0=80, y1=100, fillcolor="red", opacity=0.3, layer="below", line_width=0)
-            
-            for l in [20, 50, 80]:
-                fig1.add_shape(type="line", x0=df_final.index.min(), x1=df_final.index.max(), y0=l, y1=l, 
-                              line=dict(color='gray', dash='dot', width=1), opacity=0.5)
+    # Chart 1 – Breadth %
+    st.subheader("Market Breadth (% stocks > 200 SMA)")
+    fig1 = go.Figure()
+    fig1.add_trace(go.Scatter(
+        x=df_chart['Date'], y=df_chart['Breadth %'],
+        fill='tozeroy', fillcolor='rgba(0,242,255,0.15)',
+        line=dict(color='#00f2ff', width=2),
+        name='Breadth %'
+    ))
+    
+    fig1.add_hrect(0, 20, fillcolor="green", opacity=0.25, line_width=0)
+    fig1.add_hrect(80, 100, fillcolor="red", opacity=0.25, line_width=0)
+    
+    for level in [20, 50, 80]:
+        fig1.add_hline(y=level, line_dash="dot", line_color="gray", opacity=0.6)
+    
+    fig1.update_layout(
+        template="plotly_dark", height=480, margin=dict(l=10,r=10,t=30,b=10),
+        yaxis=dict(range=[0,100], title="%"), xaxis_rangeslider_visible=False
+    )
+    st.plotly_chart(fig1, use_container_width=True)
 
-            fig1.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=450,
-                xaxis=dict(rangeslider=dict(visible=False), type="date"),
-                yaxis=dict(range=[0, 100], fixedrange=True, title="Percentage (%)"), margin=dict(t=10, b=10))
-            
-            st.plotly_chart(fig1)
+    # Chart 2 – Stacked participation
+    st.subheader("Participation (Above vs Below)")
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(x=df_chart['Date'], y=df_chart['Above'],
+                             name="Above", stackgroup='one',
+                             fillcolor='rgba(34,197,94,0.5)', line_width=0))
+    fig2.add_trace(go.Scatter(x=df_chart['Date'], y=df_chart['Below'],
+                             name="Below", stackgroup='one',
+                             fillcolor='rgba(239,68,68,0.5)', line_width=0))
+    
+    fig2.update_layout(
+        template="plotly_dark", height=420, margin=dict(l=10,r=10,t=30,b=0),
+        yaxis_title="Number of Stocks", hovermode="x unified",
+        legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center")
+    )
+    st.plotly_chart(fig2, use_container_width=True)
 
-            # Chart 2
-            st.subheader("2. Market Participation")
-            fig2 = go.Figure()
-            fig2.add_trace(go.Scatter(x=df_final.index, y=df_final['Count Above'], mode='lines', name='Above 200 SMA', stackgroup='one', line=dict(width=0), fillcolor='rgba(34, 197, 94, 0.6)'))
-            fig2.add_trace(go.Scatter(x=df_final.index, y=df_final['Count Below'], mode='lines', name='Below 200 SMA', stackgroup='one', line=dict(width=0), fillcolor='rgba(239, 68, 68, 0.6)'))
-            fig2.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=400,
-                xaxis=dict(rangeslider=dict(visible=True), type="date"), yaxis=dict(title="Number of Stocks"),
-                hovermode="x unified", margin=dict(t=10, b=0), legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center"))
-            
-            st.plotly_chart(fig2)
-            
-            st.markdown("---")
-            with st.expander(f"⚠️ View List of {len(excluded_clean)} Excluded Stocks"):
-                st.write("These stocks have insufficient data (New IPOs) or failed to download.")
-                col_a, col_b, col_c, col_d = st.columns(4)
-                for idx, stock in enumerate(excluded_clean):
-                    if idx % 4 == 0: col_a.write(f"• {stock}")
-                    elif idx % 4 == 1: col_b.write(f"• {stock}")
-                    elif idx % 4 == 2: col_c.write(f"• {stock}")
-                    else: col_d.write(f"• {stock}")
-            
-        else:
-            st.error("Calculated data is empty.")
-    else:
-        st.error("No data downloaded.")
+    # Excluded list
+    if excluded_tickers:
+        with st.expander(f"Excluded stocks ({len(excluded_tickers)}) – usually recent listings / data issues"):
+            st.write(", ".join(sorted(excluded_tickers)))
 else:
-    st.error("Could not fetch ticker list.")
+    st.warning("Not enough data points to calculate breadth after cleaning.")
+
+st.caption("Data: Yahoo Finance • 200-day SMA • Last update: " + str(data.index[-1].date()))
