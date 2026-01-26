@@ -22,7 +22,6 @@ st.markdown("""
 # ---------------------------------------------------------
 @st.cache_data(ttl=3600)
 def get_nifty500_tickers():
-    # A verified list of Nifty 500 tickers (Updated)
     tickers = [
         "360ONE.NS", "3MINDIA.NS", "ABB.NS", "ACC.NS", "AIAENG.NS", "APLAPOLLO.NS", "AUBANK.NS", "AARTIIND.NS", 
         "AAVAS.NS", "ABBOTINDIA.NS", "ADANIENSOL.NS", "ADANIENT.NS", "ADANIGREEN.NS", "ADANIPORTS.NS", "ADANIPOWER.NS", 
@@ -95,55 +94,71 @@ def get_nifty500_tickers():
     return list(set(tickers))
 
 # ---------------------------------------------------------
-# 3. STEALTH MODE DATA ENGINE (Bypass Yahoo 401 Error)
+# 3. ROBUST SESSION-PER-BATCH DOWNLOADER
 # ---------------------------------------------------------
 def fetch_full_market_data(tickers):
     if not tickers:
         return pd.DataFrame()
     
-    st.info(f"🚀 Starting STEALTH MODE download for {len(tickers)} stocks. This takes 3-4 minutes but avoids blocking.")
+    st.info(f"🚀 Starting ROBUST download for {len(tickers)} stocks. This takes 2-3 minutes...")
     
-    # SETUP BROWSER SESSION (This fixes the 401 Unauthorized error)
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    })
+    # Batch size 15 is safe for Yahoo limits
+    chunk_size = 15 
+    chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
     
     all_data = []
-    progress_bar = st.progress(0, text="Initializing Stealth Mode...")
+    progress_bar = st.progress(0, text="Initializing...")
     start_time = time.time()
-    total_tickers = len(tickers)
     
-    # We download ONE BY ONE to look like a human browsing
-    # We use yf.Ticker(...).history() which is more robust than download()
-    for i, ticker in enumerate(tickers):
+    for i, chunk in enumerate(chunks):
         try:
-            # Update Progress every 5 stocks to save UI updates
-            if i % 5 == 0:
-                elapsed = int(time.time() - start_time)
-                progress_bar.progress((i + 1) / total_tickers, text=f"Fetching {ticker} ({i+1}/{total_tickers}) - {elapsed}s")
+            # Create a FRESH session for each batch to prevent "dictionary changed size" error
+            # and to reset headers/cookies which fools Yahoo better.
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            })
 
-            # FETCH
-            dat = yf.Ticker(ticker, session=session).history(period="10y", auto_adjust=True)
+            elapsed = int(time.time() - start_time)
+            progress_bar.progress((i) / len(chunks), text=f"Downloading Batch {i+1}/{len(chunks)} ({elapsed}s)")
             
-            if not dat.empty:
-                # Keep only Close column and rename it to ticker
-                dat = dat[['Close']]
-                dat.columns = [ticker]
-                all_data.append(dat)
+            # Using download() with the session is cleaner for batches
+            batch = yf.download(
+                chunk, 
+                start="2015-01-01", 
+                progress=False, 
+                threads=False, # Must be False to use custom session correctly
+                timeout=20, 
+                auto_adjust=True,
+                session=session # Pass the fresh session
+            )
             
-        except Exception:
-            # Silently fail for individual stocks to keep the dashboard alive
-            pass
+            # Clean Data Structure
+            if isinstance(batch.columns, pd.MultiIndex):
+                if 'Close' in batch.columns.get_level_values(0):
+                    batch = batch['Close']
+                elif 'Close' in batch.columns.get_level_values(1):
+                    batch = batch.xs('Close', axis=1, level=1, drop_level=True)
+                else:
+                    batch = batch.iloc[:, :len(chunk)]
+            
+            # Drop empty
+            batch = batch.dropna(axis=1, how='all')
+            
+            if not batch.empty:
+                all_data.append(batch)
+            
+            # Sleep 1 second between batches
+            time.sleep(1)
+            
+        except Exception as e:
+            print(f"Batch {i} skipped: {e}")
             
     progress_bar.empty()
     
     if all_data:
-        # Combine all single columns into one big DataFrame
         full_df = pd.concat(all_data, axis=1)
-        # Sort index to ensure dates are aligned
-        full_df.sort_index(inplace=True)
-        return full_df
+        return full_df.loc[:, ~full_df.columns.duplicated()]
         
     return pd.DataFrame()
 
@@ -155,7 +170,6 @@ st.title("⚡ Nifty 500 Market Breadth")
 tickers = get_nifty500_tickers()
 
 if tickers:
-    # Use the new Stealth Function
     data = fetch_full_market_data(tickers)
     
     if not data.empty:
@@ -189,7 +203,6 @@ if tickers:
             latest = df_final.iloc[-1]
             prev = df_final.iloc[-2] if len(df_final) > 1 else latest
             
-            # Metrics
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Stocks > 200 SMA (%)", f"{latest['Breadth %']:.1f}%", f"{latest['Breadth %'] - prev['Breadth %']:.1f}%")
             c2.metric("Count Above", f"{int(latest['Count Above'])}", f"{int(latest['Count Above'] - prev['Count Above'])}")
@@ -227,7 +240,6 @@ if tickers:
             
             st.plotly_chart(fig2)
             
-            # Excluded List
             st.markdown("---")
             with st.expander(f"⚠️ View List of {len(excluded_clean)} Excluded Stocks"):
                 st.write("These stocks have insufficient data (New IPOs) or failed to download.")
