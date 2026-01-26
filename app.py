@@ -3,10 +3,10 @@ import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
 import time
-import numpy as np
+from datetime import datetime
 
 # ---------------------------------------------------------
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # ---------------------------------------------------------
 st.set_page_config(page_title="Nifty 500 Market Breadth", layout="wide")
 
@@ -19,109 +19,69 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# TICKER LIST (manually maintained – update periodically)
+# DYNAMIC NIFTY 500 TICKERS FROM NSE
 # ---------------------------------------------------------
-@st.cache_data(ttl=86400)  # 24 hours
+@st.cache_data(ttl=86400)  # refresh daily
 def get_nifty500_tickers():
-    tickers = [
-        "360ONE.NS", "3MINDIA.NS", "ABB.NS", "ACC.NS", "AIAENG.NS", "APLAPOLLO.NS", "AUBANK.NS", "AARTIIND.NS", 
-        "AAVAS.NS", "ABBOTINDIA.NS", "ADANIENSOL.NS", "ADANIENT.NS", "ADANIGREEN.NS", "ADANIPORTS.NS", "ADANIPOWER.NS", 
-        "ATGL.NS", "AWL.NS", "ABCAPITAL.NS", "ABFRL.NS", "ABSLAMC.NS", "ETHERMOT.NS", "AFFLE.NS", "AJANTPHARM.NS", 
-        "APLLTD.NS", "ALKEM.NS", "ALKYLAMINE.NS", "ALLCARGO.NS", "ALOKINDS.NS", "ARE&M.NS", "AMBER.NS", "AMBUJACEM.NS", 
-        "ANANDRATHI.NS", "ANGELONE.NS", "ANURAS.NS", "APARINDS.NS", "APOLLOHOSP.NS", "APOLLOTYRE.NS", "APTUS.NS", 
-        "ACI.NS", "ASAHIINDIA.NS", "ASHOKLEY.NS", "ASIANPAINT.NS", "ASTERDM.NS", "ASTRAZEN.NS", "ASTRAL.NS", "ATUL.NS", 
-        "AUROPHARMA.NS", "AVANTIFEED.NS", "DMART.NS", "AXISBANK.NS", "BASF.NS", "BSE.NS", "BAJAJ-AUTO.NS", "BAJFINANCE.NS", 
-        "BAJAJFINSV.NS", "BAJAJHLDNG.NS", "BALAMINES.NS", "BALKRISIND.NS", "BALRAMCHIN.NS", "BANDHANBNK.NS", 
-        "BANKBARODA.NS", "BANKINDIA.NS", "MAHABANK.NS", "BATAINDIA.NS", "BAYERCROP.NS", "BERGEPAINT.NS", "BDL.NS", 
-        "BEL.NS", "BHARATFORG.NS", "BHEL.NS", "BPCL.NS", "BHARTIARTL.NS", "BIKAJI.NS", "BIOCON.NS", "BIRLACORPN.NS", 
-        "BSOFT.NS", "BLS.NS", "BLUESTARCO.NS", "BORORENEW.NS", "BOSCHLTD.NS", "BRIGADE.NS", "BCG.NS", "BRITANNIA.NS", 
-        "MAPMYINDIA.NS", "CCL.NS", "CESC.NS", "CGPOWER.NS", "CIEINDIA.NS", "CRISIL.NS", "CSBBANK.NS", "CAMPUS.NS", 
-        "CANFINHOME.NS", "CANBK.NS", "CAPLIPOINT.NS", "CGCL.NS", "CARBORUNIV.NS", "CASTROLIND.NS", "CEATLTD.NS", 
-        "CENTRALBK.NS", "CDSL.NS", "CENTURYPLY.NS", "CERA.NS", "CHALET.NS", "CHAMBLFERT.NS", "CHEMPLASTS.NS", 
-        "CHOLAHLDNG.NS", "CHOLAFIN.NS", "CIPLA.NS", "CUB.NS", "CLEAN.NS", "COALINDIA.NS", "COCHINSHIP.NS", "COFORGE.NS", 
-        "COLPAL.NS", "CAMS.NS", "CONCOR.NS", "COROMANDEL.NS", "CRAFTSMAN.NS", "CREDITACC.NS", "CROMPTON.NS", 
-        "CUMMINSIND.NS", "CYIENT.NS", "DCMSHRIRAM.NS", "DLF.NS", "DABUR.NS", "DALBHARAT.NS", "DATAPATTNS.NS", 
-        "DEEPAKFERT.NS", "DEEPAKNTR.NS", "DELHIVERY.NS", "DEVYANI.NS", "DIVISLAB.NS", "DIXON.NS", "LALPATHLAB.NS", 
-        "DRREDDY.NS", "EIDPARRY.NS", "EIHOTEL.NS", "EPL.NS", "EASEMYTRIP.NS", "EICHERMOT.NS", "ELECON.NS", "ELGIEQUIP.NS", 
-        "EMAMILTD.NS", "ENDURANCE.NS", "EQUITASBNK.NS", "ERIS.NS", "ESCORTS.NS", "EXIDEIND.NS", "FDC.NS", "NYKAA.NS", 
-        "FEDERALBNK.NS", "FACT.NS", "FINEORG.NS", "FINCABLES.NS", "FINPIPE.NS", "FSL.NS", "FORTIS.NS", "GRINFRA.NS", 
-        "GAIL.NS", "GMMPFAUDLR.NS", "GMRAIRPORT.NS", "GALAXYSURF.NS", "GARFIBRES.NS", "GATEWAY.NS", "GENUSPOWER.NS", 
-        "GESHIP.NS", "GICRE.NS", "GILLETTE.NS", "GLAND.NS", "GLAXO.NS", "GLENMARK.NS", "MEDANTA.NS", "GOCOLORS.NS", 
-        "GODFRYPHLP.NS", "GODREJAGRO.NS", "GODREJCP.NS", "GODREJIND.NS", "GODREJPROP.NS", "GPPL.NS", "GRANULES.NS", 
-        "GRAPHITE.NS", "GRASIM.NS", "GRINDWELL.NS", "GUJALKALI.NS", "GAEL.NS", "FLUOROCHEM.NS", "GUJGASLTD.NS", 
-        "GMDCLTD.NS", "GNFC.NS", "GPIL.NS", "GSFC.NS", "GSPL.NS", "HEG.NS", "HBLPOWER.NS", "HCLTECH.NS", "HDFCAMC.NS", 
-        "HDFCBANK.NS", "HDFCLIFE.NS", "HFCL.NS", "HLEGLAS.NS", "HAPPSTMNDS.NS", "HATHWAY.NS", "HATSUN.NS", "HAVELLS.NS", 
-        "HEMIPROP.NS", "HEROMOTOCO.NS", "HIKAL.NS", "HIMATSEIDE.NS", "HINDALCO.NS", "HAL.NS", "HINDCOPPER.NS", 
-        "HINDPETRO.NS", "HINDUNILVR.NS", "HINDZINC.NS", "HOMEFIRST.NS", "HONAUT.NS", "HUDCO.NS", "ICICIBANK.NS", 
-        "ICICIGI.NS", "ICICIPRULI.NS", "IDBI.NS", "IDFCFIRSTB.NS", "IFBIND.NS", "IIFL.NS", "IRB.NS", "IRCON.NS", "ITC.NS", 
-        "ITI.NS", "INDIACEM.NS", "INDIAMART.NS", "INDIANB.NS", "IEX.NS", "INDHOTEL.NS", "IOC.NS", "IOB.NS", "IRCTC.NS", 
-        "IRFC.NS", "INDIGOPNTS.NS", "IGL.NS", "INDUSTOWER.NS", "INDUSINDBK.NS", "INFIBEAM.NS", "NAUKRI.NS", "INFY.NS", 
-        "INGERRAND.NS", "INTELLECT.NS", "INDIGO.NS", "IPCALAB.NS", "JBCHEPHARM.NS", "JKCEMENT.NS", "JKLAKSHMI.NS", 
-        "JKPAPER.NS", "JKTYRE.NS", "JMFINANCIL.NS", "JSWENERGY.NS", "JSWINFRA.NS", "JSWSTEEL.NS", "JAICORPLTD.NS", 
-        "J&KBANK.NS", "JINDALSAW.NS", "JSL.NS", "JINDALSTEL.NS", "JIOFIN.NS", "JUBLFOOD.NS", "JUBLINGREA.NS", 
-        "JUBLPHARMA.NS", "JUSTDIAL.NS", "JYOTHYLAB.NS", "KPRMILL.NS", "KEI.NS", "KNRCON.NS", "KPITTECH.NS", "KRBL.NS", 
-        "KSB.NS", "KAJARIACER.NS", "KPIL.NS", "KALYANKJIL.NS", "KANSAINER.NS", "KARURVYSYA.NS", "KEC.NS", "KIRLOSENG.NS", 
-        "KIRLOSBROS.NS", "KFINTECH.NS", "KOTAKBANK.NS", "KIMS.NS", "LTF.NS", "LT.NS", "LTTS.NS", "LICHSGFIN.NS", 
-        "LTIM.NS", "LAOPALA.NS", "LATENTVIEW.NS", "LAURUSLABS.NS", "LXCHEM.NS", "LEMONTREE.NS", "LICI.NS", 
-        "LINDEINDIA.NS", "LUPIN.NS", "MMTC.NS", "MOIL.NS", "MRF.NS", "MTARTECH.NS", "LODHA.NS", "MGL.NS", "M&MFIN.NS", 
-        "M&M.NS", "MHRIL.NS", "MAHLIFE.NS", "MANAPPURAM.NS", "MRPL.NS", "MANKIND.NS", "MARICO.NS", "MARUTI.NS", 
-        "MASTEK.NS", "MFSL.NS", "MAXHEALTH.NS", "MAZDOCK.NS", "MEDPLUS.NS", "METROBRAND.NS", "METROPOLIS.NS", 
-        "MINDACORP.NS", "MSUMI.NS", "MOTILALOFS.NS", "MPHASIS.NS", "MCX.NS", "MUTHOOTFIN.NS", "NATCOPHARM.NS", 
-        "NBCC.NS", "NCC.NS", "NHPC.NS", "NLCINDIA.NS", "NMDC.NS", "NSLNISP.NS", "NOCIL.NS", "NTPC.NS", "NH.NS", 
-        "NATIONALUM.NS", "NAVINFLUOR.NS", "NAZARA.NS", "NESTLEIND.NS", "NETWORK18.NS", "NAM-INDIA.NS", "NUVAMA.NS", 
-        "NUVOCO.NS", "OBEROIRLTY.NS", "ONGC.NS", "OIL.NS", "OLECTRA.NS", "PAYTM.NS", "OFSS.NS", "ORIENTELEC.NS", 
-        "POLICYBZR.NS", "PCBL.NS", "PIIND.NS", "PNBHOUSING.NS", "PNCINFRA.NS", "PVRINOX.NS", "PAGEIND.NS", 
-        "PATANJALI.NS", "PERSISTENT.NS", "PETRONET.NS", "PHOENIXLTD.NS", "PIDILITIND.NS", "PPLPHARMA.NS", 
-        "POLYMED.NS", "POLYCAB.NS", "POONAWALLA.NS", "PFC.NS", "POWERGRID.NS", "PRAJIND.NS", "PRESTIGE.NS", 
-        "PRINCEPIPE.NS", "PGHH.NS", "PNB.NS", "QUESS.NS", "RRKABEL.NS", "RBLBANK.NS", "RECLTD.NS", "RHIM.NS", 
-        "RITES.NS", "RADICO.NS", "RVNL.NS", "RAILTEL.NS", "RAIN.NS", "RAINBOW.NS", "RAJESHEXPO.NS", "RALLIS.NS", 
-        "RCF.NS", "RATNAMANI.NS", "RTNINDIA.NS", "RAYMOND.NS", "REDINGTON.NS", "RELIANCE.NS", "RBA.NS", "ROSSARI.NS", 
-        "ROUTE.NS", "SBFC.NS", "SBICARD.NS", "SBILIFE.NS", "SJVN.NS", "SKFINDIA.NS", "SRF.NS", "SAFARI.NS", 
-        "MOTHERSON.NS", "SANOFI.NS", "SAPPHIRE.NS", "SAREGAMA.NS", "SCHAEFFLER.NS", "SCHNEIDER.NS", "SEQUENT.NS", 
-        "SHARDACROP.NS", "SFL.NS", "SHILPAMED.NS", "SCI.NS", "RENUKA.NS", "SHRIRAMFIN.NS", "SHYAMMETL.NS", "SIEMENS.NS", 
-        "SOBHA.NS", "SOLARINDS.NS", "SONACOMS.NS", "SONATSOFTW.NS", "SOUTHBANK.NS", "SPANDANA.NS", "SPARC.NS", 
-        "STARHEALTH.NS", "SBIN.NS", "SAIL.NS", "SWSOLAR.NS", "STLTECH.NS", "STAR.NS", "SUDARSCHEM.NS", "SUMICHEM.NS", 
-        "SUNPHARMA.NS", "SUNTV.NS", "SUNDARMFIN.NS", "SUNDRMFAST.NS", "SUNTECK.NS", "SUPRAJIT.NS", "SUPREMEIND.NS", 
-        "SUZLON.NS", "SYMPHONY.NS", "SYRMA.NS", "TVSMOTOR.NS", "TANLA.NS", "TATACHEM.NS", "TATACOMM.NS", "TCS.NS", 
-        "TATACONSUM.NS", "TATAELXSI.NS", "TATAINVEST.NS", "TATAMOTORS.NS", "TATAPOWER.NS", "TATASTEEL.NS", 
-        "TATATECH.NS", "TTML.NS", "TEAMLEASE.NS", "TECHM.NS", "TEJASNET.NS", "NIACL.NS", "RAMCOCEM.NS", "THERMAX.NS", 
-        "TIMKEN.NS", "TITAN.NS", "TORNTPHARM.NS", "TORNTPOWER.NS", "TRENT.NS", "TRIDENT.NS", "TRIVENI.NS", 
-        "TRITURBINE.NS", "TIINDIA.NS", "UCOBANK.NS", "UNOMINDA.NS", "UPL.NS", "UTIAMC.NS", "UJJIVANSFB.NS", 
-        "ULTRACEMCO.NS", "UNIONBANK.NS", "UBL.NS", "UNISPIRITS.NS", "VGUARD.NS", "VIPIND.NS", "VAIBHAVGBL.NS", 
-        "VAKRANGEE.NS", "VARROC.NS", "VBL.NS", "VEDL.NS", "MANYAVAR.NS", "VIJAYA.NS", "VINATIORGA.NS", "IDEA.NS", 
-        "VOLTAS.NS", "WELCORP.NS", "WELSPUNLIV.NS", "WESTLIFE.NS", "WHIRLPOOL.NS", "WIPRO.NS", "WOCKPHARMA.NS", 
-        "YESBANK.NS", "ZFCVINDIA.NS", "ZEEL.NS", "ZENSARTECH.NS", "ZOMATO.NS", "ZYDUSLIFE.NS", "ZYDUSWELL.NS", "ECLERX.NS"
-        # Add newly included stocks from 2024–2026 here (check NSE monthly)
-    ]
-    return sorted(list(set(tickers)))   # remove accidental duplicates
+    url = "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
+    try:
+        df = pd.read_csv(url)
+        # Flexible column detection
+        symbol_col = None
+        for col in df.columns:
+            if 'symbol' in col.lower():
+                symbol_col = col
+                break
+        
+        if not symbol_col:
+            st.error("Could not detect 'Symbol' column in NSE CSV. Format may have changed.")
+            return []
+        
+        symbols = df[symbol_col].dropna().astype(str).str.strip().str.upper()
+        # Filter obviously invalid entries
+        symbols = symbols[symbols.str.len().between(3, 12) & symbols.str.isalnum()]
+        
+        tickers = [sym + ".NS" for sym in symbols]
+        tickers = sorted(list(set(tickers)))
+        
+        st.success(f"Loaded {len(tickers)} Nifty 500 tickers from NSE")
+        return tickers
+    
+    except Exception as e:
+        st.error(f"Failed to fetch Nifty 500 list: {str(e)}")
+        st.info("Using fallback minimal list – please try again later")
+        # Very small fallback in case of complete failure
+        fallback = ["RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "HINDUNILVR.NS"]
+        return fallback
 
 # ---------------------------------------------------------
-# IMPROVED SAFE DOWNLOADER
+# SAFE MARKET DATA DOWNLOADER (daily refresh)
 # ---------------------------------------------------------
+@st.cache_data(ttl=86400, show_spinner="Refreshing daily market data...")
 def fetch_full_market_data(tickers):
     if not tickers:
         return pd.DataFrame()
     
-    chunk_size = 12          # smaller = safer
+    chunk_size = 12
     sleep_time = 3.0
-    max_retries_per_chunk = 2
+    max_retries = 2
     
     n = len(tickers)
-    st.info(f"Downloading {n} Nifty 500 stocks in safe mode (~4–7 min)...")
+    st.info(f"Downloading {n} stocks safely (daily refresh mode)...")
     
     chunks = [tickers[i:i + chunk_size] for i in range(0, n, chunk_size)]
     all_data = []
     
     progress = st.progress(0.0)
-    status_text = st.empty()
+    status = st.empty()
     
-    time_start = time.time()   # Fixed: define elapsed time reference
+    start_time = time.time()
     
     for i, chunk in enumerate(chunks):
-        for attempt in range(max_retries_per_chunk + 1):
+        for attempt in range(max_retries + 1):
             try:
-                elapsed = int(time.time() - time_start)
-                status_text.text(f"Batch {i+1}/{len(chunks)} (attempt {attempt+1}) – {elapsed}s elapsed")
+                elapsed = int(time.time() - start_time)
+                status.text(f"Batch {i+1}/{len(chunks)} (attempt {attempt+1}) – {elapsed}s elapsed")
                 
                 batch = yf.download(
                     chunk,
@@ -136,15 +96,15 @@ def fetch_full_market_data(tickers):
                 if batch.empty:
                     break
                 
-                # Robust Close extraction
+                # Robust close price extraction
                 if isinstance(batch.columns, pd.MultiIndex):
                     if 'Close' in batch.columns.get_level_values(0):
                         batch = batch['Close']
                     elif 'Close' in batch.columns.get_level_values(1):
-                        batch = batch.xs('Close', axis=1, level=1, drop_level=True)
+                        batch = batch.xs('Close', level=1, axis=1)
                     else:
                         batch = batch.iloc[:, :len(chunk)]
-                        batch.columns = [t for t in chunk[:len(batch.columns)]]
+                        batch.columns = chunk[:len(batch.columns)]
                 elif len(chunk) == 1:
                     batch.columns = chunk
                 
@@ -156,18 +116,18 @@ def fetch_full_market_data(tickers):
                 break  # success
                 
             except Exception as e:
-                if attempt < max_retries_per_chunk:
-                    time.sleep(5 * (attempt + 1))
-                else:
-                    st.warning(f"Batch {i+1} failed after {max_retries_per_chunk+1} attempts: {str(e)}")
+                if attempt == max_retries:
+                    st.warning(f"Batch {i+1} failed after {max_retries+1} attempts: {str(e)}")
+                time.sleep(5 * (attempt + 1))
         
         progress.progress((i + 1) / len(chunks))
         time.sleep(sleep_time)
     
-    status_text.empty()
+    status.empty()
     progress.empty()
     
     if not all_data:
+        st.error("No usable price data downloaded.")
         return pd.DataFrame()
     
     df = pd.concat(all_data, axis=1)
@@ -175,48 +135,55 @@ def fetch_full_market_data(tickers):
     df = df.dropna(how='all', axis=0)
     
     return df
+
 # ---------------------------------------------------------
-# MAIN LOGIC
+# MAIN APP
 # ---------------------------------------------------------
 st.title("⚡ Nifty 500 Market Breadth Dashboard")
+
+# Force refresh button
+if st.button("🔄 Force Full Refresh (Tickers + Data)", type="primary"):
+    st.cache_data.clear()
+    st.rerun()
 
 tickers = get_nifty500_tickers()
 
 if not tickers:
-    st.error("Ticker list empty.")
     st.stop()
 
 data = fetch_full_market_data(tickers)
 
 if data.empty:
-    st.error("Failed to download any usable data. Try again later — Yahoo is very strict in 2026.")
+    st.error("No price data available. Try force refresh or check later.")
     st.stop()
 
-with st.spinner("Computing breadth indicators..."):
-    sma_200 = data.rolling(window=200, min_periods=100).mean()   # allow partial on newer stocks
+# Calculate metrics
+with st.spinner("Calculating breadth indicators..."):
+    # Use min_periods=100 to allow newer stocks to contribute partially
+    sma_200 = data.rolling(window=200, min_periods=100).mean()
     
-    # Latest complete day
     latest_close = data.iloc[-1]
-    latest_sma   = sma_200.iloc[-1]
+    latest_sma = sma_200.iloc[-1]
     
-    valid_mask = latest_sma.notna() & latest_close.notna()
+    valid = latest_close.notna() & latest_sma.notna()
     
-    above = (latest_close > latest_sma) & valid_mask
-    below = (latest_close <= latest_sma) & valid_mask
+    above = (latest_close > latest_sma) & valid
+    below = (~above) & valid
     
-    count_above_now = above.sum()
-    count_below_now = below.sum()
-    count_valid_now = count_above_now + count_below_now
-    count_excluded  = len(tickers) - count_valid_now
+    count_above = above.sum()
+    count_below = below.sum()
+    count_valid = count_above + count_below
+    excluded_count = len(tickers) - count_valid
     
-    excluded_tickers = data.columns[~valid_mask].str.replace('.NS$', '', regex=True).tolist()
+    excluded_stocks = data.columns[~valid].str.replace('.NS$', '', regex=True).tolist()
     
-    # Time series for chart
+    # Time series
     has_sma = sma_200.notna()
     count_above_ts = (data > sma_200).where(has_sma).sum(axis=1)
     count_below_ts = (data <= sma_200).where(has_sma).sum(axis=1)
     
-    breadth_pct_ts = (count_above_ts / (count_above_ts + count_below_ts) * 100).where((count_above_ts + count_below_ts) >= 100)
+    valid_count_ts = count_above_ts + count_below_ts
+    breadth_pct_ts = (count_above_ts / valid_count_ts * 100).where(valid_count_ts >= 100)
     
     df_chart = pd.DataFrame({
         'Date': data.index,
@@ -225,25 +192,39 @@ with st.spinner("Computing breadth indicators..."):
         'Below': count_below_ts
     }).dropna(subset=['Breadth %'])
 
-# ────────────────────────────────────────────────
-# METRICS
-# ────────────────────────────────────────────────
+# Display results
 if not df_chart.empty:
     latest = df_chart.iloc[-1]
-    prev   = df_chart.iloc[-2] if len(df_chart) > 1 else latest
+    prev = df_chart.iloc[-2] if len(df_chart) > 1 else latest
     
     cols = st.columns(4)
-    cols[0].metric("Above 200 SMA (%)", f"{latest['Breadth %']:.1f}%", f"{latest['Breadth %']-prev['Breadth %']:.1f}%")
-    cols[1].metric("Count Above", f"{int(latest['Above']):,}", f"{int(latest['Above']-prev['Above']):+}")
-    cols[2].metric("Count Below", f"{int(latest['Below']):,}", f"{int(latest['Below']-prev['Below']):+}", delta_color="inverse")
-    cols[3].metric("Excluded / No 200 SMA", f"{count_excluded} / {len(tickers)}")
-
-    # Chart 1 – Breadth %
-    st.subheader("Market Breadth (% stocks > 200 SMA)")
+    cols[0].metric(
+        "Above 200 SMA (%)",
+        f"{latest['Breadth %']:.1f}%",
+        f"{latest['Breadth %'] - prev['Breadth %']:.1f}%"
+    )
+    cols[1].metric(
+        "Count Above",
+        f"{int(latest['Above']):,}",
+        f"{int(latest['Above'] - prev['Above']):+}"
+    )
+    cols[2].metric(
+        "Count Below",
+        f"{int(latest['Below']):,}",
+        f"{int(latest['Below'] - prev['Below']):+}",
+        delta_color="inverse"
+    )
+    cols[3].metric(
+        "Excluded (no 200 SMA)",
+        f"{excluded_count} / {len(tickers)}"
+    )
+    
+    # Chart 1: Breadth %
+    st.subheader("Market Breadth (% stocks > 200-day SMA)")
     fig1 = go.Figure()
     fig1.add_trace(go.Scatter(
         x=df_chart['Date'], y=df_chart['Breadth %'],
-        fill='tozeroy', fillcolor='rgba(0,242,255,0.15)',
+        fill='tozeroy', fillcolor='rgba(0, 242, 255, 0.2)',
         line=dict(color='#00f2ff', width=2),
         name='Breadth %'
     ))
@@ -251,37 +232,49 @@ if not df_chart.empty:
     fig1.add_hrect(0, 20, fillcolor="green", opacity=0.25, line_width=0)
     fig1.add_hrect(80, 100, fillcolor="red", opacity=0.25, line_width=0)
     
-    for level in [20, 50, 80]:
-        fig1.add_hline(y=level, line_dash="dot", line_color="gray", opacity=0.6)
+    for lvl in [20, 50, 80]:
+        fig1.add_hline(y=lvl, line_dash="dot", line_color="gray", opacity=0.6)
     
     fig1.update_layout(
-        template="plotly_dark", height=480, margin=dict(l=10,r=10,t=30,b=10),
-        yaxis=dict(range=[0,100], title="%"), xaxis_rangeslider_visible=False
+        template="plotly_dark", height=480,
+        margin=dict(l=10, r=10, t=30, b=10),
+        yaxis=dict(range=[0, 100], title="%"),
+        xaxis_rangeslider_visible=False
     )
     st.plotly_chart(fig1, use_container_width=True)
-
-    # Chart 2 – Stacked participation
-    st.subheader("Participation (Above vs Below)")
+    
+    # Chart 2: Stacked counts
+    st.subheader("Participation (Above vs Below 200 SMA)")
     fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(x=df_chart['Date'], y=df_chart['Above'],
-                             name="Above", stackgroup='one',
-                             fillcolor='rgba(34,197,94,0.5)', line_width=0))
-    fig2.add_trace(go.Scatter(x=df_chart['Date'], y=df_chart['Below'],
-                             name="Below", stackgroup='one',
-                             fillcolor='rgba(239,68,68,0.5)', line_width=0))
+    fig2.add_trace(go.Scatter(
+        x=df_chart['Date'], y=df_chart['Above'],
+        name="Above", stackgroup='one',
+        fillcolor='rgba(34,197,94,0.5)', line_width=0
+    ))
+    fig2.add_trace(go.Scatter(
+        x=df_chart['Date'], y=df_chart['Below'],
+        name="Below", stackgroup='one',
+        fillcolor='rgba(239,68,68,0.5)', line_width=0
+    ))
     
     fig2.update_layout(
-        template="plotly_dark", height=420, margin=dict(l=10,r=10,t=30,b=0),
-        yaxis_title="Number of Stocks", hovermode="x unified",
+        template="plotly_dark", height=420,
+        margin=dict(l=10, r=10, t=30, b=0),
+        yaxis_title="Number of Stocks",
+        hovermode="x unified",
         legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center")
     )
     st.plotly_chart(fig2, use_container_width=True)
-
+    
     # Excluded list
-    if excluded_tickers:
-        with st.expander(f"Excluded stocks ({len(excluded_tickers)}) – usually recent listings / data issues"):
-            st.write(", ".join(sorted(excluded_tickers)))
+    if excluded_stocks:
+        with st.expander(f"Excluded stocks ({len(excluded_stocks)}) – usually recent listings"):
+            st.write(", ".join(sorted(excluded_stocks)))
+    
+    # Footer
+    last_date = data.index[-1].strftime("%Y-%m-%d")
+    refresh_time = datetime.now().strftime("%Y-%m-%d %H:%M IST")
+    st.caption(f"Data as of {last_date} • Last refresh: {refresh_time} • Source: Yahoo Finance + NSE")
+    
 else:
-    st.warning("Not enough data points to calculate breadth after cleaning.")
-
-st.caption("Data: Yahoo Finance • 200-day SMA • Last update: " + str(data.index[-1].date()))
+    st.warning("Not enough historical data to compute breadth after cleaning.")
