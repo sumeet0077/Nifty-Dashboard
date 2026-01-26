@@ -101,127 +101,96 @@ if tickers:
     if not data.empty:
         with st.spinner("Calculating moving averages..."):
             sma_200 = data.rolling(window=200).mean()
-            valid_stocks = data.notna().sum(axis=1)
-            valid_mask = valid_stocks >= 100
+            
+            # Identify Excluded Stocks (Latest date has NaN SMA)
+            # We look at the very last row of the SMA dataframe
+            latest_sma_values = sma_200.iloc[-1]
+            excluded_tickers = latest_sma_values[latest_sma_values.isna()].index.tolist()
+            
+            # Remove .NS for cleaner display
+            excluded_clean = [x.replace('.NS', '') for x in excluded_tickers]
             
             # --- CALCULATIONS ---
-            count_above = (data >= sma_200).sum(axis=1)
-            count_below = valid_stocks - count_above
+            has_sma = sma_200.notna()
             
-            # Breadth Percentage
-            breadth_pct = (count_above / valid_stocks) * 100
+            count_above = (data > sma_200).astype(int)
+            count_above = count_above.where(has_sma).sum(axis=1)
+            
+            count_below = (data <= sma_200).astype(int)
+            count_below = count_below.where(has_sma).sum(axis=1)
+            
+            valid_total = count_above + count_below
+            total_target = len(tickers)
+            count_excluded = total_target - valid_total
+            
+            breadth_pct = (count_above / valid_total) * 100
+            
+            valid_mask = valid_total >= 100
             breadth_pct[~valid_mask] = pd.NA
             
-            # Clean up the counts for plotting
-            count_above[~valid_mask] = pd.NA
-            count_below[~valid_mask] = pd.NA
-            
-            # Create a combined DataFrame for easier handling
             df_final = pd.DataFrame({
                 'Breadth %': breadth_pct,
                 'Count Above': count_above,
-                'Count Below': count_below
+                'Count Below': count_below,
+                'Excluded': count_excluded
             }).dropna()
 
         if not df_final.empty:
             latest = df_final.iloc[-1]
             prev = df_final.iloc[-2] if len(df_final) > 1 else latest
             
-            # --- METRICS ROW ---
+            # --- METRICS ---
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Stocks > 200 SMA (%)", f"{latest['Breadth %']:.1f}%", f"{latest['Breadth %'] - prev['Breadth %']:.1f}%")
             c2.metric("Count Above (Bullish)", f"{int(latest['Count Above'])}", f"{int(latest['Count Above'] - prev['Count Above'])}")
             c3.metric("Count Below (Bearish)", f"{int(latest['Count Below'])}", f"{int(latest['Count Below'] - prev['Count Below'])}", delta_color="inverse")
-            
-            sentiment = "Neutral"
-            if latest['Breadth %'] > 80: sentiment = "Overbought"
-            elif latest['Breadth %'] < 20: sentiment = "Oversold"
-            c4.metric("Sentiment", sentiment)
+            c4.metric("Excluded (New IPOs)", f"{int(latest['Excluded'])}", help="Stocks with <200 days history")
 
-            # --- CHART 1: BREADTH PERCENTAGE ---
+            # --- CHART 1 ---
             st.subheader("1. Breadth Percentage (Indicator)")
-            
-            # Calculate Peaks and Troughs
-            max_breadth = df_final['Breadth %'].max()
-            max_date = df_final['Breadth %'].idxmax()
-            min_breadth = df_final['Breadth %'].min()
-            min_date = df_final['Breadth %'].idxmin()
-
             fig1 = go.Figure()
-            # Main Line
             fig1.add_trace(go.Scatter(x=df_final.index, y=df_final['Breadth %'], fill='tozeroy', 
                                      fillcolor='rgba(0, 242, 255, 0.2)',
                                      line=dict(color='#00f2ff', width=1.5), name='Breadth %'))
             
-            # --- COLOR BANDS ---
-            # 1. GREEN BAND (0-20%): Prominent Green
+            # Bands: Green (0-20), Red (80-100)
             fig1.add_hrect(y0=0, y1=20, fillcolor="green", opacity=0.3, layer="below", line_width=0)
-            
-            # 2. RED BAND (80-100%): Prominent Red
             fig1.add_hrect(y0=80, y1=100, fillcolor="red", opacity=0.3, layer="below", line_width=0)
             
-            # Note: 20-80% is left as default (Black/Dark Background)
-            
-            # Reference Lines (Dotted)
             for l in [20, 50, 80]:
                 fig1.add_shape(type="line", x0=df_final.index.min(), x1=df_final.index.max(), y0=l, y1=l, 
                               line=dict(color='gray', dash='dot', width=1), opacity=0.5)
 
-            # Annotations for Peak and Trough
-            fig1.add_annotation(
-                x=max_date, y=max_breadth,
-                text=f"Peak: {max_breadth:.1f}%",
-                showarrow=True, arrowhead=1, ax=0, ay=-40,
-                bgcolor="#1f2937", bordercolor="#ef4444", font=dict(color="#ef4444")
-            )
-            fig1.add_annotation(
-                x=min_date, y=min_breadth,
-                text=f"Trough: {min_breadth:.1f}%",
-                showarrow=True, arrowhead=1, ax=0, ay=40,
-                bgcolor="#1f2937", bordercolor="#22c55e", font=dict(color="#22c55e")
-            )
-
-            fig1.update_layout(
-                template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=450,
+            fig1.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=450,
                 xaxis=dict(rangeslider=dict(visible=False), type="date"),
-                yaxis=dict(range=[0, 100], fixedrange=True, title="Percentage (%)"),
-                margin=dict(t=10, b=10)
-            )
+                yaxis=dict(range=[0, 100], fixedrange=True, title="Percentage (%)"), margin=dict(t=10, b=10))
             st.plotly_chart(fig1, use_container_width=True)
 
-            # --- CHART 2: STACKED COUNT CHART ---
-            st.subheader("2. Market Participation (Volume of Stocks)")
+            # --- CHART 2 ---
+            st.subheader("2. Market Participation")
             fig2 = go.Figure()
-
-            # Stacked Area: Green (Above)
-            fig2.add_trace(go.Scatter(
-                x=df_final.index, y=df_final['Count Above'],
-                mode='lines',
-                name='Above 200 SMA',
-                stackgroup='one', 
-                line=dict(width=0),
-                fillcolor='rgba(34, 197, 94, 0.6)' 
-            ))
-
-            # Stacked Area: Red (Below)
-            fig2.add_trace(go.Scatter(
-                x=df_final.index, y=df_final['Count Below'],
-                mode='lines',
-                name='Below 200 SMA',
-                stackgroup='one',
-                line=dict(width=0),
-                fillcolor='rgba(239, 68, 68, 0.6)' 
-            ))
-
-            fig2.update_layout(
-                template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=400,
-                xaxis=dict(rangeslider=dict(visible=True), type="date"), 
-                yaxis=dict(title="Number of Stocks"),
-                hovermode="x unified",
-                margin=dict(t=10, b=0),
-                legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center")
-            )
+            fig2.add_trace(go.Scatter(x=df_final.index, y=df_final['Count Above'], mode='lines', name='Above 200 SMA', stackgroup='one', line=dict(width=0), fillcolor='rgba(34, 197, 94, 0.6)'))
+            fig2.add_trace(go.Scatter(x=df_final.index, y=df_final['Count Below'], mode='lines', name='Below 200 SMA', stackgroup='one', line=dict(width=0), fillcolor='rgba(239, 68, 68, 0.6)'))
+            fig2.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=400,
+                xaxis=dict(rangeslider=dict(visible=True), type="date"), yaxis=dict(title="Number of Stocks"),
+                hovermode="x unified", margin=dict(t=10, b=0), legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center"))
             st.plotly_chart(fig2, use_container_width=True)
+            
+            # --- EXCLUDED LIST SECTION ---
+            st.markdown("---")
+            with st.expander(f"⚠️ View List of {len(excluded_clean)} Excluded Stocks (Insufficient Data / New IPOs)"):
+                st.write("These stocks were found in the Nifty 500 list but do not have a valid 200-day Moving Average yet (usually because they listed less than 200 days ago).")
+                
+                # Format as a clean table
+                # Split list into 4 columns for readability
+                col_a, col_b, col_c, col_d = st.columns(4)
+                
+                # Distribute items across columns
+                for idx, stock in enumerate(excluded_clean):
+                    if idx % 4 == 0: col_a.write(f"• {stock}")
+                    elif idx % 4 == 1: col_b.write(f"• {stock}")
+                    elif idx % 4 == 2: col_c.write(f"• {stock}")
+                    else: col_d.write(f"• {stock}")
             
         else:
             st.error("Calculated data is empty.")
